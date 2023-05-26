@@ -1,0 +1,13 @@
+version: '3'
+
+services:
+  atsms:
+    build: .
+    image: terracecn/atsms
+    restart: always
+    environment:
+      - COM_PORT=/dev/ttyACM0
+      - COM_BAUD=115200
+    volumes:
+      - /dev/ttyACM0:/dev/ttyACM0
+    privileged: true
