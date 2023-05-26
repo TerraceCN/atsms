@@ -96,7 +96,7 @@ class Air780E:
 
     def cgatt(self) -> bool:
         return self.send_regex("AT+CGATT?", r"\+CGATT: (\d)")[0] == "1"
-    
+
     def sms_loop(self):
         while True:
             line = self.readline(False)
@@ -108,7 +108,9 @@ class Air780E:
             pdu = self.readline()
             try:
                 sms = decode_pdu(pdu, int(length))
-                logger.info(f"SMS from {sms[0]}, time: {sms[1].strftime('%Y-%m-%d %H:%M:%S %z')}, content: {sms[2]}")
+                logger.info(
+                    f"SMS from {sms[0]}, time: {sms[1].strftime('%Y-%m-%d %H:%M:%S %z')}, content: {sms[2]}"
+                )
             except Exception:
                 logger.error(f"Failed to decode PDU, raw data: {pdu}")
 
@@ -161,12 +163,16 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(
         description="AT command SMS client",
     )
-    parser.add_argument("-p", "--port", default="auto", required=False, help="serial port")
-    parser.add_argument("-b", "--baudrate", type=int, default=115200, required=False, help="baudrate")
+    parser.add_argument(
+        "-p", "--port", default="auto", required=False, help="serial port"
+    )
+    parser.add_argument(
+        "-b", "--baudrate", type=int, default=115200, required=False, help="baudrate"
+    )
     parser.add_argument("--log-level", default="INFO", required=False, help="log level")
     args = parser.parse_args()
 
     logger.remove()
     logger.add(sys.stderr, level=args.log_level)
-    
+
     main(args)

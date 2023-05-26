@@ -34,9 +34,11 @@ def decode_number(data: Union[str, int, bytes]):
 
 def gsm_7bit_decode(ud: bytes) -> str:
     f = tohex(ud, False)
-    f = ''.join(["{0:08b}".format(int(f[i:i+2], 16)) for i in range(0, len(f), 2)][::-1])
-    chrs = [chr(int(f[::-1][i:i+7][::-1], 2)) for i in range(0, len(f), 7)]
-    return ''.join([c for c in chrs if c != '\x00'])
+    f = "".join(
+        ["{0:08b}".format(int(f[i : i + 2], 16)) for i in range(0, len(f), 2)][::-1]
+    )
+    chrs = [chr(int(f[::-1][i : i + 7][::-1], 2)) for i in range(0, len(f), 7)]
+    return "".join([c for c in chrs if c != "\x00"])
 
 
 def gsm_8bit_decode(ud: bytes) -> str:
@@ -113,7 +115,7 @@ def decode_pdu(data: str, length: int):
     i += udl
 
     return (
-        ('+' if oa_ton else '') + from_number,
+        ("+" if oa_ton else "") + from_number,
         recv_dt,
         decode_udl(ud, dcs),
     )
