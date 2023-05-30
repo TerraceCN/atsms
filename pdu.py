@@ -14,7 +14,7 @@ def tohex(data: Union[str, int, bytes], with_space: bool = True):
         return "".join(f"{b:02x}" for b in data)
 
 
-def print_hex(data: Union[str, int, bytes]) -> bytes:
+def print_hex(data: Union[str, int, bytes]):
     print(tohex(data))
 
 
@@ -42,14 +42,16 @@ def gsm_7bit_decode(ud: bytes) -> str:
 
 
 def gsm_8bit_decode(ud: bytes) -> str:
-    return [chr(b) for b in ud]
+    return "".join([chr(b) for b in ud])
 
 
 def gsm_usc2_decode(ud: bytes) -> str:
     return ud.decode("utf-16-be")
 
 
-def decode_udl(data: bytes, dcs: int) -> str:
+def decode_udl(data: Union[bytes, int], dcs: int) -> str:
+    if isinstance(data, int):
+        data = bytes([data])
     if dcs == 0:
         return gsm_7bit_decode(data)
     elif dcs == 4:

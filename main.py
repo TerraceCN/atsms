@@ -120,20 +120,21 @@ class Air780E:
 
 
 def main(arg):
+    s = None
     if arg.port == "auto":
-        detected = False
-        for s in comports():
-            s = Air780E(s.device, arg.baudrate)
+        for p in comports():
+            s = Air780E(p.device, arg.baudrate)
             try:
                 s.open()
                 if s.check_device():
-                    detected = True
                     break
                 else:
                     s.close()
+                    s = None
             except Exception:
                 s.close()
-        if not detected:
+                s = None
+        if s is None:
             logger.error("Cannot find Air780E")
             return
     else:
