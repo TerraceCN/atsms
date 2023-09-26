@@ -6,8 +6,10 @@ services:
     image: terracecn/atsms
     restart: always
     environment:
+      - TZ=Asia/Shanghai
       - COM_PORT=/dev/ttyACM0
       - COM_BAUD=115200
-    volumes:
+    devices:
       - /dev/ttyACM0:/dev/ttyACM0
     privileged: true
+    network_mode: none
