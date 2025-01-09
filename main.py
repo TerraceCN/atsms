@@ -1,163 +1,116 @@
 # -*- coding: utf-8 -*-
-import sys
+
 import argparse
-import re
+import sys
 import time
 
-import serial
-import serial.threaded
-from serial.tools.list_ports import comports
 from loguru import logger
 
-from pdu import *
+from air780e import Air780E, ModuleNotFoundError, MTPDU
+
+sms_tmp: dict[bytes, list[MTPDU]] = {}  # 长短信暂存
 
 
-class Air780E:
-    def __init__(self, port, baudrate=115200, timeout=1):
-        self.port = port
-        self.baudrate = baudrate
-        self.s = serial.Serial(timeout=timeout)
-        self.s.port = port
-        self.s.baudrate = baudrate
+def handle_cmt(data: bytes):
+    global sms_tmp
+    try:
+        sms = MTPDU.decode(data)
+        logger.debug(f"Receive SMS: {sms}")
+    except Exception:
+        logger.error(f"Failed to decode PDU, raw data: {data}")
+        return
 
-    def open(self):
-        self.s.open()
+    logger.debug(f"Receive SMS: {sms}")
+    if sms.ud.iei == 0x00:  # 长短信
+        ident = sms.ud.ied[0:-2]  # 短信标识
+        total = sms.ud.ied[-2]  # 短信总条数
+        index = sms.ud.ied[-1]  # 短信序号
 
-    def close(self):
-        self.s.close()
+        logger.info(f"[Receive long SMS] Ident: {ident}, Progress: {index}/{total}")
 
-    def send(self, command: str):
-        self.s.write(command.encode("utf-8") + b"\r\n")
-        self.s.flush()
-        logger.debug(f"Serial send: {command}")
+        if ident not in sms_tmp:
+            sms_tmp[ident] = []
+        sms_tmp[ident].append(sms)
 
-    def readline(self, raise_timeout: bool = True) -> str:
-        line_raw = b""
-        while True:
-            raw = self.s.readline()
-            if not raw:
-                if raise_timeout:
-                    raise RuntimeError("Serial timeout")
-                break
-            line_raw += raw
-            if raw.endswith(b"\r\n"):
-                break
-        line = line_raw.decode("utf-8").strip()
-        if line:
-            logger.debug(f"Serial recv: {line}")
-        return line
+        if len(sms_tmp[ident]) != total:  # 消息未接收完整
+            return
 
-    def send_recv(self, command: str):
-        self.send(command)
+        sms_tmp[ident].sort(key=lambda x: x.ud.ied[-1])  # 排序
 
-        lines = []
-        status = "OK"
-        while True:
-            line = self.readline()
+        sender = str(sms_tmp[ident][0].oa)
+        sc_time = sms_tmp[ident][0].scts.strftime("%Y-%m-%d %H:%M:%S %z")
+        content = "".join(x.ud.content for x in sms_tmp[ident])
 
-            if not line or line == command:
-                continue
-            if line == "OK":
-                break
-            if line == "ERROR":
-                status = "ERROR"
-                continue
+        sms_tmp.pop(ident)
+    else:
+        sender = str(sms.oa)
+        sc_time = sms.scts.strftime("%Y-%m-%d %H:%M:%S %z")
+        content = sms.ud.content
 
-            lines.append(line)
-
-        data = "\n".join(lines)
-        if status == "ERROR":
-            raise RuntimeError(f"AT command error: {data}")
-        return data
-
-    def set_config(self):
-        self.send_recv("ATE0")
-        self.send_recv('AT+UPGRADE="AUTO",0')
-        self.send_recv("AT+CMGF=0")
-        self.send_recv('AT+CSCS="UCS2"')
-        self.send_recv("AT+CNMI=2,2,0,0,0")
-
-    def send_regex(self, command: str, regex: str):
-        resp = self.send_recv(command)
-        if (r := re.match(regex, resp)) is None:
-            raise RuntimeError(f"Cannnot get {regex}")
-        return r.groups()
-
-    def cgmm(self) -> str:
-        return self.send_regex("AT+CGMM", r"\+CGMM: \"(.*?)\"")[0]
-
-    def simdetec(self) -> bool:
-        return (
-            self.send_regex("AT*SIMDETEC=1", r"\*SIMDETEC: (\d),(NOS|SIM)")[1] == "SIM"
-        )
-
-    def iccid(self) -> str:
-        return self.send_regex("AT+ICCID", r"\+ICCID: (\d+)")[0]
-
-    def cgatt(self) -> bool:
-        return self.send_regex("AT+CGATT?", r"\+CGATT: (\d)")[0] == "1"
-
-    def sms_loop(self):
-        while True:
-            line = self.readline(False)
-
-            if not line.startswith("+CMT:"):
-                continue
-
-            _, length = line[5:].split(",")
-            pdu = self.readline()
-            try:
-                sms = decode_pdu(pdu, int(length))
-                logger.info(
-                    f"SMS from {sms[0]}, time: {sms[1].strftime('%Y-%m-%d %H:%M:%S %z')}, content: {sms[2]}"
-                )
-            except Exception:
-                logger.error(f"Failed to decode PDU, raw data: {pdu}")
-
-    def check_device(self):
-        self.send_recv("AT")
-        return self.cgmm() == "Air780E"
+    logger.info(f"[Receive SMS] FROM: {sender}, TIME: {sc_time}, CONTENT: {content!r}")
 
 
 def main(arg):
-    s = None
     if arg.port == "auto":
-        for p in comports():
-            s = Air780E(p.device, arg.baudrate)
-            try:
-                s.open()
-                if s.check_device():
-                    break
-                else:
-                    s.close()
-                    s = None
-            except Exception:
-                s.close()
-                s = None
-        if s is None:
-            logger.error("Cannot find Air780E")
+        try:
+            module = Air780E.find_module(baudrate=arg.baudrate, timeout=30)
+        except ModuleNotFoundError:
+            logger.error("Air780E is not found")
             return
     else:
-        s = Air780E(arg.port, arg.baudrate)
-        s.open()
-        assert s.check_device()
+        module = Air780E(arg.port, arg.baudrate)
+        module.open()
+        module.check_module()
 
-    logger.info(f"Air780E connected, port: {s.s.portstr}")
+    logger.info(f"Air780E connected, port: {module.port}")
 
-    if not s.simdetec():
+    info = module.get_full_info()
+    for k, v in info.items():
+        logger.info(f"{k}: {v}")
+
+    module.send_recv("ATE1")  # 启动命令回显
+    module.send_recv("AT+CMEE=0")  # 禁用结果码
+    module.send_recv("AT+CSCS=UCS2")  # 设置TE字符集为UCS-2
+    module.send_recv("AT+CMGF=0")  # 设置短信格式为PDU
+    module.send_recv("AT+CNMI=2,2,0,0,0")  # 设置新消息指示
+    module.send_recv("AT&W")  # 保存配置
+
+    sim_detect = module.send_regex("AT*SIMDETEC=1", r"\*SIMDETEC: \d+,(NOS|SIM)")[0]
+    if sim_detect != "SIM":  # SIM卡检测
         logger.error("SIM card is not detected")
         return
-    logger.info(f"SIM card is detected, ICCID: {s.iccid()}")
+    iccid = module.send_regex("AT+ICCID", r"\+ICCID: (.+)")[0]  # 获取ICCID
+    logger.info(f"SIM card is detected, ICCID: {iccid}")
 
-    s.set_config()
+    # module.send_recv("AT^SYSCONFIG=2,0,1,1")  # 设置网络模式
+    # module.send_recv("AT+COPS=4,2,46001")  # 设置运营商
+    # module.send_recv("AT+CPNETAPN=2,giffgaff.com,gg,p")  # 设置APN
 
-    while not s.cgatt():
-        logger.info("Waiting for GPRS...")
+    while int(module.send_regex("AT+CGATT?", r"\+CGATT: (\d)")[0]) == 0:  # 等待GPRS附着
+        gprs_status = int(module.send_regex("AT+CGREG?", r"\+CGREG: \d+,(\d)")[0])
+        logger.info(f"Waiting for GPRS attaching (current status: {gprs_status})")
         time.sleep(1)
-    logger.info("GPRS is attached")
+
+    module.send_recv("AT+COPS=3,0")  # 设置运营商格式
+    cper = module.send_regex("AT+COPS?", r"\+COPS: \d+,\d+,\"(.+?)\"")[0]  # 获取运营商
+    logger.info(f"GPRS attached, Operator: {cper}")
+
+    # module.send_recv("AT+CGREG=1")  # 打开网络注册状态主动上报
+    # module.send_recv("AT*CSQ=1")  # 打开信号质量主动上报
 
     logger.info("Waiting for SMS...")
-    s.sms_loop()
+    while True:
+        line = module.readline(False)
+
+        if line.startswith("+CMT:"):
+            try:
+                pdu = module.readline()
+                handle_cmt(pdu)
+            except Exception:
+                logger.exception(f"Failed to handle CMT")
+
+        if line.startswith("+CSQ"):
+            pass
 
 
 if __name__ == "__main__":

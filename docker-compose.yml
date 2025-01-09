@@ -4,10 +4,12 @@ services:
   atsms:
     build: .
     image: terracecn/atsms
+    container_name: atsms
     restart: always
     environment:
+      - TZ=Asia/Shanghai
       - COM_PORT=/dev/ttyACM0
       - COM_BAUD=115200
-    volumes:
+    devices:
       - /dev/ttyACM0:/dev/ttyACM0
     privileged: true
