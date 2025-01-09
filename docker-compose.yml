@@ -13,3 +13,4 @@ services:
     devices:
       - /dev/ttyACM0:/dev/ttyACM0
     privileged: true
+    network_mode: none
