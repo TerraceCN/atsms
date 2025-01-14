@@ -7,6 +7,7 @@ import time
 from loguru import logger
 
 from air780e import Air780E, ModuleNotFoundError, MTPDU
+from air780e.encoding import tohex
 
 sms_tmp: dict[bytes, list[MTPDU]] = {}  # 长短信暂存
 
@@ -22,7 +23,7 @@ def handle_cmt(data: bytes):
 
     logger.debug(f"Receive SMS: {sms}")
     if sms.ud.iei == 0x00:  # 长短信
-        ident = sms.ud.ied[0:-2]  # 短信标识
+        ident = tohex(sms.ud.ied[0:-2])  # 短信标识
         total = sms.ud.ied[-2]  # 短信总条数
         index = sms.ud.ied[-1]  # 短信序号
 
